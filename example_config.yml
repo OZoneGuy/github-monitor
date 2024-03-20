@@ -1,0 +1,13 @@
+organization: my-org
+repository: my-repo
+monitoring: 
+  - name: jobs
+    status: queued
+    workflow: workflow.yml
+  - name: pull_requests
+    status: open
+  - name: rate_limits
+    pat_env: BOT_1
+  - name: jobs
+    status: running
+    repo: other-repo
