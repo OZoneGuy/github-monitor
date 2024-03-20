@@ -1,13 +1,14 @@
-organization: my-org
+owner: my-org
 repository: my-repo
 monitoring: 
-  - name: jobs
-    status: queued
+  - name: job
     workflow: workflow.yml
+    status: queued
   - name: pull_requests
     status: open
-  - name: rate_limits
+  - name: rate_limit
     pat_env: BOT_1
-  - name: jobs
+  - name: job
+    workflow: wolkfow.yml
     status: running
     repo: other-repo

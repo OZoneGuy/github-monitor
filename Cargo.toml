@@ -9,7 +9,6 @@ edition = "2021"
 anyhow = "1.0.80"
 chrono = "0.4.35"
 clap = { version = "4.5.3", features = ["derive", "env", "cargo"] }
-env_logger = "0.11.3"
 jsonwebtoken = "9.2.0"
 lazy_static = "1.4.0"
 log = "0.4.21"
@@ -18,4 +17,5 @@ prometheus = "0.13.3"
 serde = { version = "1.0.197", features = ["derive", "alloc", "rc"] }
 serde_json = "1.0.114"
 serde_yaml = "0.9.32"
+simple_logger = "4.3.3"
 tokio = { version = "1.36.0", features = ["time", "rt", "macros"] }

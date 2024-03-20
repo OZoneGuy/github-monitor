@@ -14,7 +14,9 @@ pub(crate) struct Repository {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(rename = "owner")]
     pub default_owner: Rc<str>,
+    #[serde(rename = "repository")]
     pub default_repo: Rc<str>,
     #[serde(default = "default_monitor_period")]
     pub monitor_period: u64,
@@ -28,22 +30,22 @@ fn default_monitor_period() -> u64 {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "name")]
 pub enum Monitoring {
+    #[serde(rename = "job")]
     Job {
         status: Option<String>,
         workflow: String,
-
         #[serde(flatten)]
         repo: Option<Repository>,
     },
+    #[serde(rename = "pull_requests")]
     PullRequests {
         status: Option<PRStatus>,
         labels: Option<Vec<String>>,
         #[serde(flatten)]
         repo: Option<Repository>,
     },
-    RateLimit {
-        pat_env: String,
-    },
+    #[serde(rename = "rate_limit")]
+    RateLimit { pat_env: String },
     Custom {
         url: String,
         query: Option<String>,
@@ -54,6 +56,7 @@ pub enum Monitoring {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum PRStatus {
     Open,
     Closed,
