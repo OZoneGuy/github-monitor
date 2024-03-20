@@ -1,0 +1,189 @@
+use std::rc::Rc;
+
+use log::{debug, error, info};
+use octocrab::{params::State, Octocrab};
+use serde::Deserialize;
+
+use crate::prometheus::{self, JOBS_QUEUE_SIZE, PULL_REQUESTS_COUNT};
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct Repository {
+    owner: String,
+    repository: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub default_owner: Rc<str>,
+    pub default_repo: Rc<str>,
+    #[serde(default = "default_monitor_period")]
+    pub monitor_period: u64,
+    pub monitoring: Vec<Rc<Monitoring>>,
+}
+
+fn default_monitor_period() -> u64 {
+    30
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "name")]
+pub enum Monitoring {
+    Job {
+        status: Option<String>,
+        workflow: String,
+
+        #[serde(flatten)]
+        repo: Option<Repository>,
+    },
+    PullRequests {
+        status: Option<PRStatus>,
+        labels: Option<Vec<String>>,
+        #[serde(flatten)]
+        repo: Option<Repository>,
+    },
+    RateLimit {
+        pat_env: String,
+    },
+    Custom {
+        url: String,
+        query: Option<String>,
+        prometheus_metric: PrometheusMetric,
+        #[serde(flatten)]
+        repo: Option<Repository>,
+    },
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) enum PRStatus {
+    Open,
+    Closed,
+    All,
+}
+
+impl Into<String> for &PRStatus {
+    fn into(self) -> String {
+        match self {
+            PRStatus::Open => "open".to_string(),
+            PRStatus::Closed => "closed".to_string(),
+            PRStatus::All => "all".to_string(),
+        }
+    }
+}
+
+impl Into<State> for PRStatus {
+    fn into(self) -> State {
+        match self {
+            PRStatus::Open => State::Open,
+            PRStatus::Closed => State::Closed,
+            PRStatus::All => State::All,
+        }
+    }
+}
+#[derive(Debug, Deserialize)]
+pub(crate) enum PrometheusMetric {
+    Counter,
+    Gauge,
+    Histogram,
+    Summary,
+}
+
+pub async fn query(
+    octo: &Octocrab,
+    def_owner: Rc<str>,
+    def_repo: Rc<str>,
+    monitor: Rc<Monitoring>,
+) {
+    info!("Querying {:?}", monitor);
+    let default = Repository {
+        owner: def_owner.to_string(),
+        repository: def_repo.to_string(),
+    };
+    debug!("Default repo settings: {:?}", default);
+    match monitor.as_ref() {
+        Monitoring::Job {
+            status,
+            workflow,
+            repo,
+        } => {
+            let repo_def = repo.as_ref().unwrap_or(&default);
+            debug!("Using repo settings: {:?}", repo_def);
+
+            let builder = octo.workflows(&repo_def.owner, &repo_def.repository);
+            let mut run_builder = builder.list_runs(workflow);
+            if let Some(status) = &status {
+                debug!("Filtering job status to {:?}", status);
+                run_builder = run_builder.status(status);
+            }
+            info!("Querying repo runs");
+            let runs = run_builder.send().await.unwrap();
+            debug!("Got runs: {:?}", runs);
+
+            info!("Pushing metrics to prometheus");
+            JOBS_QUEUE_SIZE
+                .with_label_values(&[
+                    &repo_def.owner,
+                    &repo_def.repository,
+                    &status.as_ref().unwrap_or(&"".to_string()),
+                    &workflow,
+                ])
+                .set(runs.total_count.unwrap_or(0) as i64);
+        }
+        Monitoring::PullRequests {
+            status,
+            labels,
+            repo,
+        } => {
+            let repo_def = repo.as_ref().unwrap_or(&default);
+            debug!("Using repo settings: {:?}", repo_def);
+
+            let builder = octo.issues(&repo_def.owner, &repo_def.repository);
+            let mut pull_builder = builder.list();
+            if let Some(status) = &status {
+                debug!("Filtering pull request status to {:?}", status);
+                pull_builder = pull_builder.state(status.clone().into());
+            }
+            if let Some(labels) = &labels {
+                debug!("Filtering pull request labels to {:?}", labels);
+                pull_builder = pull_builder.labels(labels)
+            }
+            let pulls = pull_builder.send().await.unwrap();
+            let tmp: String = status.as_ref().unwrap_or(&PRStatus::All).into();
+
+            info!("Pushing metrics to prometheus");
+            PULL_REQUESTS_COUNT
+                .with_label_values(&[
+                    &repo_def.owner,
+                    &repo_def.repository,
+                    &tmp,
+                    &labels.as_ref().unwrap_or(&vec![]).join(","),
+                ])
+                .set(pulls.total_count.unwrap_or(0) as i64);
+        }
+        Monitoring::RateLimit { pat_env } => {
+            info!("Querying rate limit for {}", &pat_env);
+            let pat = std::env::var(&pat_env).unwrap();
+            let octo = Octocrab::builder().personal_token(pat).build().unwrap();
+            let user = octo
+                .current()
+                .user()
+                .await
+                .expect(format!("Failed to get user for {}", &pat_env).as_str());
+            debug!("Got user: {:?}", user);
+            let rate = octo
+                .ratelimit()
+                .get()
+                .await
+                .expect(format!("Failed to get rate limit for {}", &pat_env).as_str());
+            debug!("Got rate limit: {:?}", rate);
+
+            info!("Pushing metrics to prometheus");
+            prometheus::RATE_LIMIT
+                .with_label_values(&[&user.login])
+                .set(rate.resources.core.remaining as i64);
+        }
+        Monitoring::Custom { .. } => {
+            error!("Custom monitoring not implemented");
+            panic!("Not implemented");
+        }
+    }
+}
