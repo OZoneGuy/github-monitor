@@ -17,11 +17,10 @@ mod prometheus;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     // setup logging
-    simple_logger::init().expect("Failed to initialize logger");
 
     // setup octo client
-    trace!("Parsing args");
     let args = Args::parse();
+    simple_logger::init_with_level(args.log_level.into()).unwrap();
 
     info!("Reading config from {}", args.config);
     let file = fs::File::open(args.config).expect("Failed to open config file");
