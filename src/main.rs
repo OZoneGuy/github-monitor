@@ -49,8 +49,9 @@ async fn main() {
     info!("Starting the monitoring loop");
     let period = std::time::Duration::from_secs(config.monitor_period);
     debug!("Monitoring period: {:?}", period);
+    let mut interval = tokio::time::interval(period);
     loop {
-        tokio::time::interval(period);
+        interval.tick().await;
         for monitor in &config.monitoring {
             query(
                 &octo,
