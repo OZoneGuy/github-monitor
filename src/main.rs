@@ -5,6 +5,7 @@ use clap::Parser;
 use config::Config;
 use jsonwebtoken::EncodingKey;
 use octocrab::{models::AppId, Octocrab};
+use prometheus::serve;
 
 use log::{debug, info, trace};
 
@@ -45,6 +46,10 @@ async fn main() {
         );
     }
     let octo = Arc::new(octo_builder.build().expect("Failed to build octocrab"));
+
+    tokio::spawn(async {
+        serve().await.expect("Failed to start prometheus server");
+    });
 
     info!("Starting the monitoring loop");
     let period = std::time::Duration::from_secs(config.monitor_period);
