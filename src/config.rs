@@ -151,6 +151,14 @@ pub async fn query(
                 pull_builder = pull_builder.labels(labels)
             }
             let pulls = pull_builder.send().await.unwrap();
+            // NOTE: This probably downloads all issue, then gets the count. Should look into a
+            // better solution
+            // NOTE: Using the `total_count` does not return the correct count. It could be
+            // possible that this workaround is needed any
+            let count = pulls
+                .into_iter()
+                .filter(|issue| issue.pull_request.is_some())
+                .count();
             let tmp: String = status.as_ref().unwrap_or(&PRStatus::All).into();
 
             info!("Pushing metrics to prometheus");
@@ -161,7 +169,7 @@ pub async fn query(
                     &tmp,
                     &labels.as_ref().unwrap_or(&vec![]).join(","),
                 ])
-                .set(pulls.total_count.unwrap_or(0) as i64);
+                .set(count as i64);
         }
         Monitoring::RateLimit { pat_env: bot } => {
             let user_name: String;
