@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use anyhow::Result;
 use log::{debug, error, info};
 use octocrab::{params::State, Octocrab};
 use serde::Deserialize;
@@ -45,7 +46,7 @@ pub enum Monitoring {
         repo: Option<Repository>,
     },
     #[serde(rename = "rate_limit")]
-    RateLimit { pat_env: String },
+    RateLimit { pat_env: Option<String> },
     Custom {
         url: String,
         query: Option<String>,
@@ -162,31 +163,41 @@ pub async fn query(
                 ])
                 .set(pulls.total_count.unwrap_or(0) as i64);
         }
-        Monitoring::RateLimit { pat_env } => {
-            info!("Querying rate limit for {}", &pat_env);
-            let pat = std::env::var(&pat_env).unwrap();
-            let octo = Octocrab::builder().personal_token(pat).build().unwrap();
-            let user = octo
-                .current()
-                .user()
-                .await
-                .expect(format!("Failed to get user for {}", &pat_env).as_str());
-            debug!("Got user: {:?}", user);
-            let rate = octo
-                .ratelimit()
-                .get()
-                .await
-                .expect(format!("Failed to get rate limit for {}", &pat_env).as_str());
-            debug!("Got rate limit: {:?}", rate);
+        Monitoring::RateLimit { pat_env: bot } => {
+            let user_name: String;
+            let rate_remaining: i64;
+            match bot {
+                Option::None => {
+                    (user_name, rate_remaining) = get_rate_limit(octo)
+                        .await
+                        .expect(&format!("Failed to get rate limit for self"));
+                }
+                Option::Some(pat_env) => {
+                    info!("Querying rate limit for {}", &pat_env);
+                    let pat = std::env::var(&pat_env).unwrap();
+                    let local_octo = Octocrab::builder().personal_token(pat).build().unwrap();
+                    (user_name, rate_remaining) = get_rate_limit(&local_octo)
+                        .await
+                        .expect(&format!("Failed to get rate limit for {}", &pat_env));
+                }
+            };
 
             info!("Pushing metrics to prometheus");
             prometheus::RATE_LIMIT
-                .with_label_values(&[&user.login])
-                .set(rate.resources.core.remaining as i64);
+                .with_label_values(&[&user_name])
+                .set(rate_remaining);
         }
         Monitoring::Custom { .. } => {
             error!("Custom monitoring not implemented");
             panic!("Not implemented");
         }
     }
+}
+
+async fn get_rate_limit(octo: &Octocrab) -> Result<(String, i64)> {
+    let user = octo.current().user().await?;
+    debug!("Got user: {:?}", user);
+    let rate = octo.ratelimit().get().await?;
+    debug!("Got rate limit: {:?}", rate);
+    return Ok((user.login, rate.rate.remaining as i64));
 }
