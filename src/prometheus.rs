@@ -62,12 +62,15 @@ pub async fn serve() -> Result<()> {
         let io = TokioIo::new(stream);
 
         debug!("Handling connection");
-        if let Err(er) = http1::Builder::new()
-            .serve_connection(io, service_fn(handle_connection))
-            .await
-        {
-            eprintln!("Error: {}", er);
-        }
+        tokio::task::spawn(async {
+            if let Err(er) = http1::Builder::new()
+                .serve_connection(io, service_fn(handle_connection))
+                .await
+            {
+                eprintln!("Error: {}", er);
+            }
+            debug!("Handled connection");
+        });
     }
 }
 
@@ -90,8 +93,8 @@ async fn handle_connection(req: Request<Incoming>) -> Result<Response<String>> {
     trace!("Encoding metrics");
     encoder.encode(&metrics, &mut buffer)?;
 
-    debug!("Returning metrics: {}", String::from_utf8(buffer.clone())?);
-    Ok(Response::builder()
-        .header("Content-Type", encoder.format_type())
-        .body(String::from_utf8(buffer)?)?)
+    info!("Returning metrics");
+    let str_resp = String::from_utf8(buffer)?;
+    debug!("Metrics: {}", &str_resp);
+    return Ok(Response::builder().status(200).body(str_resp).unwrap());
 }
